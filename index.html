@@ -254,7 +254,7 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 
 <div id="loading">
   <h1>📜 历史疆域图</h1>
-  <p>哈佛大学 CHGIS V6 + Hartwell GIS v5 数据</p>
+  <p>哈佛CHGIS V6 · Hartwell GIS v5 · 世界历史政权底图</p>
   <div class="lb"><div class="lp"></div></div>
 </div>
 
@@ -287,19 +287,19 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
   </div>
   <div class="lc-row" onclick="toggleLayer('world_layer')">
     <div class="lc-box" id="lc-world_layer"></div>
-    <div class="lc-dot" style="background:transparent;border:1px dashed #ffffff40"></div>
+    <div class="lc-dot" style="background:#6688bb40;border:1px solid #6688bb80"></div>
     <div>
-      <span class="lc-nm" style="font-size:10px">现代国家边界参考</span>
-      <div style="font-size:9px;color:var(--dim)">仅新中国时期有意义</div>
+      <span class="lc-nm" style="font-size:10px">同期世界政权版图</span>
+      <div style="font-size:9px;color:var(--dim)">随朝代切换对应年份</div>
     </div>
   </div>
 </div>
 
 <!-- 数据来源 -->
 <div id="data-src">
-  中国政区·<a href="https://chgis.fas.harvard.edu" target="_blank">哈佛CHGIS V6</a>+<a href="https://dataverse.harvard.edu/dataverse/chgis" target="_blank">Hartwell GIS v5</a> &nbsp;|&nbsp;
-  新中国·阿里DataV &nbsp;|&nbsp;
-  世界边界·<a href="https://naturalearthdata.com" target="_blank">Natural Earth（公域）</a> &nbsp;|&nbsp;
+  中国政区·<a href="https://chgis.fas.harvard.edu" target="_blank">哈佛CHGIS V6</a>+<a href="https://dataverse.harvard.edu/dataverse/chgis" target="_blank">Hartwell v5</a> &nbsp;|&nbsp;
+  世界政权·<a href="https://github.com/aourednik/historical-basemaps" target="_blank">aourednik/historical-basemaps（GPL-3）</a> &nbsp;|&nbsp;
+  现代边界·<a href="https://naturalearthdata.com" target="_blank">Natural Earth（公域）</a> &nbsp;|&nbsp;
   清/民国·CHGIS V6 省府
 </div>
 
@@ -637,22 +637,60 @@ function focusRegime(geojsonKey) {
   map.fitBounds(bounds, { padding: [40, 40], maxZoom: 7 });
 }
 
-/* ── 渲染世界现代国家边界层 ── */
+/* ── 渲染世界历史政权层（按朝代切换对应时间切片）── */
 function renderWorldLayer() {
   layerGroups.world_layer.clearLayers();
-  const gj = CHGIS_GEOJSON['world_modern'];
+
+  // 获取当前朝代对应的世界底图
+  const worldKey = (typeof WORLD_MAP_FOR_DYNASTY !== 'undefined')
+    ? WORLD_MAP_FOR_DYNASTY[S.dynastyId]
+    : 'world_modern';
+  const gj = CHGIS_GEOJSON[worldKey] || CHGIS_GEOJSON['world_modern'];
   if (!gj || !gj.features) return;
+
+  // 大陆色系（区分不同地区政权）
+  const continentColors = {
+    '欧洲':'#6688bb', '亚洲':'#8b6a3a', '非洲':'#5a8a5a',
+    '北美洲':'#aa5555', '南美洲':'#cc7744', '大洋洲':'#668888',
+  };
+  // 按实体名称分配颜色
+  function entityColor(name_zh, name_en) {
+    if (!name_en) return '#888';
+    const e = name_en.toLowerCase();
+    if (e.includes('roman') || e.includes('byzantine') || e.includes('greek')) return '#6688bb';
+    if (e.includes('mongol') || e.includes('turk') || e.includes('xiongnu')) return '#8b5a2a';
+    if (e.includes('arab') || e.includes('caliphate') || e.includes('ottoman') || e.includes('safavid')) return '#cc9933';
+    if (e.includes('frank') || e.includes('french') || e.includes('holy roman')) return '#5577aa';
+    if (e.includes('british') || e.includes('england') || e.includes('great britain')) return '#2244aa';
+    if (e.includes('russian') || e.includes('russia') || e.includes('kievan')) return '#884422';
+    if (e.includes('india') || e.includes('mughal') || e.includes('maurya') || e.includes('gupta')) return '#cc7744';
+    if (e.includes('japan') || e.includes('korea')) return '#aa6655';
+    if (e.includes('mali') || e.includes('songhai') || e.includes('ghana') || e.includes('kongo')) return '#558855';
+    if (e.includes('aztec') || e.includes('inca') || e.includes('maya')) return '#aa5533';
+    return '#778899';
+  }
+
   L.geoJSON(gj, {
-    style: () => ({
-      color: '#ffffff', weight: 0.8, fillOpacity: 0,
-      opacity: 0.2, dashArray: '3 5',
-    }),
+    style(feature) {
+      const p = feature.properties;
+      const c = entityColor(p.name_zh, p.name_en);
+      return {
+        color: c, weight: 0.7,
+        fillColor: c, fillOpacity: 0.12,
+        opacity: 0.55,
+      };
+    },
     onEachFeature(feature, layer) {
       const p = feature.properties;
+      const label = p.name_zh !== p.name_en ? `${p.name_zh}` : p.name_en;
       layer.bindTooltip(
-        `<b>${p.name}</b><span style="opacity:.6;font-size:9px;margin-left:4px">${p.continent||''}</span>`,
+        `<b>${label}</b>${p.name_zh !== p.name_en && p.name_en
+          ? `<span style="opacity:.55;font-size:9px;margin-left:4px">(${p.name_en})</span>`
+          : ''}`,
         { className: 'world-tt', sticky: true }
       );
+      layer.on('mouseover', () => layer.setStyle({ fillOpacity: 0.28, weight: 1.5 }));
+      layer.on('mouseout', () => layer.setStyle({ fillOpacity: 0.12, weight: 0.7 }));
     },
   }).addTo(layerGroups.world_layer);
 }
@@ -1061,6 +1099,8 @@ function updateAll() {
   renderAdminLayer();
   renderEventsLayer();
   renderWorldEventsLayer();  // 世界同期事件
+  // 朝代切换时，若世界政权层已开启，重新渲染（切换到对应时间切片）
+  if (layerVisible.world_layer) renderWorldLayer();
   updateEvList();
   updateSearchMarker();
 }
@@ -1070,9 +1110,7 @@ function toggleLayer(key) {
   layerVisible[key] = !layerVisible[key];
   const el = document.getElementById('lc-' + key);
   if (layerVisible[key]) {
-    // world_layer 需要先渲染再显示
-    if (key === 'world_layer' && !layerGroups.world_layer._layers) renderWorldLayer();
-    if (key === 'world_layer' && Object.keys(layerGroups.world_layer._layers || {}).length === 0) renderWorldLayer();
+    if (key === 'world_layer') renderWorldLayer(); // 按朝代渲染对应切片
     map.addLayer(layerGroups[key]);
     el.classList.add('on'); el.textContent = '✓';
   } else {
