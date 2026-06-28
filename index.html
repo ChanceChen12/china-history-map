@@ -230,6 +230,17 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 }
 .search-pin-label .spl-dynasty{font-size:9px;color:var(--sub);margin-top:2px;}
 
+/* ── 世界视角层 ── */
+.world-tt{
+  background:rgba(15,17,23,.88)!important;border:1px solid rgba(255,255,255,.25)!important;
+  color:#bbb!important;border-radius:5px!important;padding:4px 8px!important;font-size:10px!important;
+}
+/* 世界事件在事件列表里的特殊样式 */
+.world-ev-tag{
+  font-size:9px;padding:1px 5px;border-radius:3px;
+  background:rgba(255,255,255,.08);color:#999;border:1px solid rgba(255,255,255,.2);
+}
+
 /* 加载屏 */
 #loading{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transition:opacity .5s;}
 #loading h1{font-size:20px;color:var(--gold);letter-spacing:5px;}
@@ -261,26 +272,34 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
   <h4>图 层</h4>
   <div class="lc-row" onclick="toggleLayer('admin')">
     <div class="lc-box on" id="lc-admin">✓</div>
-    <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
-      <div style="width:10px;height:2px;background:#c9a22790;border-radius:1px"></div>
-      <div style="width:10px;height:1px;border-top:1px dashed #c9a22760"></div>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1px">
-      <span class="lc-nm" style="font-size:10px">精确府级（CHGIS）</span>
-      <span class="lc-nm" style="font-size:9px;color:var(--dim)">+ 近似疆域轮廓</span>
-    </div>
+    <div class="lc-dot" style="background:#c9a22730;border:1.5px solid #c9a227"></div>
+    <span class="lc-nm">历史行政区划</span>
   </div>
   <div class="lc-row" onclick="toggleLayer('events')">
     <div class="lc-box on" id="lc-events">✓</div>
     <div class="lc-dot" style="background:#e05c3a70;border:1.5px solid #e05c3a"></div>
-    <span class="lc-nm">历史事件</span>
+    <span class="lc-nm">中国历史事件</span>
+  </div>
+  <div class="lc-row" onclick="toggleLayer('world_events')">
+    <div class="lc-box on" id="lc-world_events">✓</div>
+    <div class="lc-dot" style="background:#ffffff30;border:1.5px solid #aaa"></div>
+    <span class="lc-nm">世界同期事件</span>
+  </div>
+  <div class="lc-row" onclick="toggleLayer('world_layer')">
+    <div class="lc-box" id="lc-world_layer"></div>
+    <div class="lc-dot" style="background:transparent;border:1px dashed #ffffff40"></div>
+    <div>
+      <span class="lc-nm" style="font-size:10px">现代国家边界参考</span>
+      <div style="font-size:9px;color:var(--dim)">仅新中国时期有意义</div>
+    </div>
   </div>
 </div>
 
 <!-- 数据来源 -->
 <div id="data-src">
-  秦汉·Voronoi（<a href="https://chgis.fas.harvard.edu" target="_blank">CHGIS V6</a> 县级点） &nbsp;|&nbsp;
-  唐宋元明·<a href="https://dataverse.harvard.edu/dataverse/chgis" target="_blank">Hartwell GIS v5</a> &nbsp;|&nbsp;
+  中国政区·<a href="https://chgis.fas.harvard.edu" target="_blank">哈佛CHGIS V6</a>+<a href="https://dataverse.harvard.edu/dataverse/chgis" target="_blank">Hartwell GIS v5</a> &nbsp;|&nbsp;
+  新中国·阿里DataV &nbsp;|&nbsp;
+  世界边界·<a href="https://naturalearthdata.com" target="_blank">Natural Earth（公域）</a> &nbsp;|&nbsp;
   清/民国·CHGIS V6 省府
 </div>
 
@@ -339,7 +358,9 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
     <div id="ev-hd">
       <h3>📋 关键事项（影响力排序）</h3>
       <div id="ev-filter">
-        <button class="ef on" data-f="all">全部</button>
+        <button class="ef on" data-f="all" data-scope="">全部</button>
+        <button class="ef" data-f="all" data-scope="china">🇨🇳 中国</button>
+        <button class="ef" data-f="all" data-scope="world">🌍 世界</button>
         <button class="ef" data-f="political">政治</button>
         <button class="ef" data-f="military">军事</button>
         <button class="ef" data-f="culture">文化</button>
@@ -356,8 +377,8 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
    eventsLayer: 历史事件（坐标固定，按朝代过滤）
 ═══════════════════════════════════════════════════════════ */
 let map;
-const layerGroups      = { admin: null, events: null };
-const layerVisible     = { admin: true, events: true };
+const layerGroups  = { admin: null, events: null, world_events: null, world_layer: null };
+const layerVisible = { admin: true, events: true, world_events: true, world_layer: false };
 let   activeGeoJsonLayer = null;  // 当前渲染的 CHGIS 图层
 let   selectedLayer      = null;  // 当前选中的多边形图层
 let   dynastyColor       = '#c9a227';
@@ -401,6 +422,7 @@ const S = {
   selectedFeature: null,
   histExpanded: false,
   evFilter: 'all',
+  evScope: '',    // '' = 全部, 'china' = 仅中国, 'world' = 仅世界
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -416,8 +438,10 @@ function initMap() {
   }).addTo(map);
   map.zoomControl.setPosition('bottomleft');
 
-  layerGroups.admin  = L.layerGroup().addTo(map);
-  layerGroups.events = L.layerGroup().addTo(map);
+  layerGroups.admin         = L.layerGroup().addTo(map);
+  layerGroups.events        = L.layerGroup().addTo(map);
+  layerGroups.world_events  = L.layerGroup().addTo(map);  // 世界事件（始终叠加）
+  layerGroups.world_layer   = L.layerGroup();              // 现代国家边界（默认关闭）
 }
 
 /* ── 构建单个政权的 GeoJSON 图层（同时填充 featureLayerMap）──
@@ -613,10 +637,33 @@ function focusRegime(geojsonKey) {
   map.fitBounds(bounds, { padding: [40, 40], maxZoom: 7 });
 }
 
-/* ── 渲染历史事件层（点击时同时高亮对应行政区划）── */
+/* ── 渲染世界现代国家边界层 ── */
+function renderWorldLayer() {
+  layerGroups.world_layer.clearLayers();
+  const gj = CHGIS_GEOJSON['world_modern'];
+  if (!gj || !gj.features) return;
+  L.geoJSON(gj, {
+    style: () => ({
+      color: '#ffffff', weight: 0.8, fillOpacity: 0,
+      opacity: 0.2, dashArray: '3 5',
+    }),
+    onEachFeature(feature, layer) {
+      const p = feature.properties;
+      layer.bindTooltip(
+        `<b>${p.name}</b><span style="opacity:.6;font-size:9px;margin-left:4px">${p.continent||''}</span>`,
+        { className: 'world-tt', sticky: true }
+      );
+    },
+  }).addTo(layerGroups.world_layer);
+}
+
+/* ── 渲染历史事件层（中国）── */
 function renderEventsLayer() {
   layerGroups.events.clearLayers();
-  const evs = EVENTS.filter(e => e.dynasty === S.dynastyId && (S.evFilter === 'all' || e.type === S.evFilter));
+  // 中国事件：无 scope 字段或 scope='china'
+  const evs = EVENTS.filter(e => e.dynasty === S.dynastyId
+    && !e.scope  // 旧数据无scope字段 = 中国事件
+    && (S.evFilter === 'all' || e.type === S.evFilter));
   evs.forEach(ev => {
     const near = Math.abs(ev.year - S.year) < 5;
     const c = typeColor(ev.type);
@@ -638,6 +685,37 @@ function renderEventsLayer() {
     // 点击地图事件标记 → 联动高亮行政区划
     m.on('click', () => onEventClick(ev));
     layerGroups.events.addLayer(m);
+  });
+}
+
+/* ── 渲染世界事件层（与中国历史同期展示）── */
+function renderWorldEventsLayer() {
+  layerGroups.world_events.clearLayers();
+  const evs = EVENTS.filter(e => e.dynasty === S.dynastyId && e.scope === 'world'
+    && (S.evFilter === 'all' || e.type === S.evFilter));
+
+  evs.forEach(ev => {
+    const near = Math.abs(ev.year - S.year) < 5;
+    const c = typeColor(ev.type);
+    // 世界事件用不同样式：菱形效果（白色外圈+类型色内圈）
+    const m = L.circleMarker([ev.lat, ev.lng], {
+      radius: 4 + ev.sig * 1.4,
+      color: '#ffffff', weight: 1.5,
+      fillColor: c, fillOpacity: near ? 0.9 : 0.45,
+    });
+    m.bindPopup(
+      `<div class="ep">
+        <div class="ep-name" style="font-size:13px">${ev.title}</div>
+        <div class="ep-meta">${yearLabel(ev.year)} · ${typeName(ev.type)} · ${'★'.repeat(ev.sig)}${'☆'.repeat(5-ev.sig)}</div>
+        <div style="display:inline-block;margin:3px 0;padding:1px 6px;border-radius:3px;border:1px solid rgba(255,255,255,.3);color:#aaa;font-size:9px">🌍 世界事件 · ${ev.unit||''}
+        </div>
+        <div class="ep-desc" style="margin-top:6px">${ev.desc}</div>
+      </div>`,
+      { maxWidth: 280 }
+    );
+    // 点击世界事件仅飞到位置，不联动高亮
+    m.on('click', () => map.flyTo([ev.lat, ev.lng], 6, { duration: 1.0 }));
+    layerGroups.world_events.addLayer(m);
   });
 }
 
@@ -895,19 +973,23 @@ function buildEvItem(ev, isAreaEvent) {
 
 function updateEvList() {
   const list = document.getElementById('ev-list');
-  let evs = EVENTS.filter(e => e.dynasty === S.dynastyId && (S.evFilter === 'all' || e.type === S.evFilter));
-  evs.sort((a, b) => b.sig - a.sig);
 
-  if (!evs.length) {
-    list.innerHTML = '<div style="font-size:11px;color:var(--dim);padding:10px 8px">暂无事件记录</div>';
-    return;
-  }
+  // 根据 scope 和 type 过滤
+  const typeOk = e => S.evFilter === 'all' || e.type === S.evFilter;
+  const chinaEvs = EVENTS.filter(e => e.dynasty === S.dynastyId && !e.scope && typeOk(e));
+  const worldEvs = EVENTS.filter(e => e.dynasty === S.dynastyId && e.scope === 'world' && typeOk(e));
+  chinaEvs.sort((a, b) => b.sig - a.sig);
+  worldEvs.sort((a, b) => b.sig - a.sig);
 
-  // 如果有选中的行政区划，在顶部显示「此区域事件」
+  // 根据 evScope 决定显示哪些
+  let showChina = S.evScope !== 'world';
+  let showWorld = S.evScope !== 'china';
+
   let html = '';
-  if (selectedUnitName) {
-    // 匹配：事件的 unit 包含选中单元名，或单元名包含事件 unit
-    const areaEvs = evs.filter(e => e.unit && (
+
+  // ── 区划联动：此区域事件（仅针对中国事件）──
+  if (selectedUnitName && showChina) {
+    const areaEvs = chinaEvs.filter(e => e.unit && (
       e.unit.includes(selectedUnitName) ||
       selectedUnitName.includes(e.unit.split('（')[0])
     ));
@@ -918,20 +1000,48 @@ function updateEvList() {
         <span style="flex:1;height:1px;background:var(--gold);opacity:.3"></span>
       </div>`;
       html += areaEvs.map(ev => buildEvItem(ev, true)).join('');
-      html += `<div style="font-size:9px;color:var(--dim);letter-spacing:1px;padding:8px 10px 4px;display:flex;align-items:center;gap:6px;margin-top:4px">
-        <span>全朝代事项</span>
-        <span style="flex:1;height:1px;background:var(--border)"></span>
+      html += `<div style="font-size:9px;color:var(--dim);padding:6px 10px 2px;display:flex;align-items:center;gap:6px;margin-top:4px">
+        <span>中国全朝代事项</span><span style="flex:1;height:1px;background:var(--border)"></span>
       </div>`;
-    } else {
-      html += `<div style="font-size:11px;color:var(--dim);padding:8px 10px">「${selectedUnitName}」暂无匹配事件记录</div>
-        <div style="font-size:9px;color:var(--dim);letter-spacing:1px;padding:4px 10px;display:flex;align-items:center;gap:6px">
-          <span>全朝代事项</span>
-          <span style="flex:1;height:1px;background:var(--border)"></span>
-        </div>`;
     }
   }
 
-  html += evs.map(ev => buildEvItem(ev, false)).join('');
+  // ── 中国事件 ──
+  if (showChina) {
+    if (!chinaEvs.length && !showWorld) {
+      html += '<div style="font-size:11px;color:var(--dim);padding:10px 8px">暂无中国事件记录</div>';
+    }
+    html += chinaEvs.map(ev => buildEvItem(ev, false)).join('');
+  }
+
+  // ── 世界同期事件（分组显示）──
+  if (showWorld && worldEvs.length) {
+    html += `<div style="font-size:9px;color:#aaa;letter-spacing:1px;padding:10px 10px 4px;display:flex;align-items:center;gap:6px;margin-top:4px">
+      <span>🌍</span><span>同期世界事件（${worldEvs.length}）</span>
+      <span style="flex:1;height:1px;background:rgba(255,255,255,.15)"></span>
+    </div>`;
+    html += worldEvs.map(ev => {
+      const near = Math.abs(ev.year - S.year) < 5;
+      const c = typeColor(ev.type);
+      const evIdx = EVENTS.indexOf(ev);
+      return `<div class="ev-item${near?' hl':''}" style="opacity:.85" onclick="map.flyTo([${ev.lat},${ev.lng}],6,{duration:1.2})">
+        <div class="ev-dot" style="background:${c};box-shadow:0 0 0 2px rgba(255,255,255,.3)"></div>
+        <div class="ev-body">
+          <div class="ev-yr">${yearLabel(ev.year)}</div>
+          <div class="ev-tt">${ev.title}</div>
+          <div class="ev-tags">
+            <span class="ev-tag" style="border-color:${c}60;color:${c}">${typeName(ev.type)}</span>
+            <span class="world-ev-tag">${ev.unit||'世界'}</span>
+          </div>
+        </div>
+        <div class="ev-stars">${Array.from({length:5},(_,i)=>`<span class="st ${i<ev.sig?'on':'off'}">${i<ev.sig?'★':'☆'}</span>`).join('')}</div>
+      </div>`;
+    }).join('');
+  } else if (showWorld && !worldEvs.length && !showChina) {
+    html += '<div style="font-size:11px;color:var(--dim);padding:10px 8px">暂无同期世界事件记录</div>';
+  }
+
+  if (!html) html = '<div style="font-size:11px;color:var(--dim);padding:10px 8px">暂无事件记录</div>';
   list.innerHTML = html;
 }
 
@@ -950,16 +1060,25 @@ function updateAll() {
   syncSlider();
   renderAdminLayer();
   renderEventsLayer();
+  renderWorldEventsLayer();  // 世界同期事件
   updateEvList();
-  updateSearchMarker(); // 朝代切换时刷新搜索标记的历史信息标注
+  updateSearchMarker();
 }
 
 /* ── 图层切换 ── */
 function toggleLayer(key) {
   layerVisible[key] = !layerVisible[key];
   const el = document.getElementById('lc-' + key);
-  if (layerVisible[key]) { map.addLayer(layerGroups[key]); el.classList.add('on'); el.textContent = '✓'; }
-  else                   { map.removeLayer(layerGroups[key]); el.classList.remove('on'); el.textContent = ''; }
+  if (layerVisible[key]) {
+    // world_layer 需要先渲染再显示
+    if (key === 'world_layer' && !layerGroups.world_layer._layers) renderWorldLayer();
+    if (key === 'world_layer' && Object.keys(layerGroups.world_layer._layers || {}).length === 0) renderWorldLayer();
+    map.addLayer(layerGroups[key]);
+    el.classList.add('on'); el.textContent = '✓';
+  } else {
+    map.removeLayer(layerGroups[key]);
+    el.classList.remove('on'); el.textContent = '';
+  }
 }
 
 /* ── 事件绑定 ── */
@@ -972,7 +1091,7 @@ function initEvents() {
     S.dynastyId = d.id;
     syncSlider(); highlightTopbar();
     if (changed) { updatePanelHeader(); renderAdminLayer(); clearLoc(); }
-    renderEventsLayer(); updateEvList();
+    renderEventsLayer(); renderWorldEventsLayer(); updateEvList();
   });
 
   let timer = null;
@@ -987,7 +1106,7 @@ function initEvents() {
       S.dynastyId = d.id;
       syncSlider(); highlightTopbar();
       if (changed) { updatePanelHeader(); renderAdminLayer(); clearLoc(); }
-      renderEventsLayer(); updateEvList();
+      renderEventsLayer(); renderWorldEventsLayer(); updateEvList();
     }, 120);
   });
 
@@ -996,7 +1115,11 @@ function initEvents() {
       document.querySelectorAll('.ef').forEach(b => b.classList.remove('on'));
       this.classList.add('on');
       S.evFilter = this.dataset.f;
-      renderEventsLayer(); updateEvList();
+      // 处理 scope 按钮（中国/世界）
+      if (this.dataset.scope !== undefined) {
+        S.evScope = this.dataset.scope;
+      }
+      renderEventsLayer(); renderWorldEventsLayer(); updateEvList();
     });
   });
 }
