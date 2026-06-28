@@ -149,22 +149,22 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 .rl-name{font-size:11px;color:var(--sub);}
 .rl-name.cur{color:var(--txt);font-weight:600;}
 
-/* ── 搜索框 ── */
+/* ── 搜索框（内嵌右侧面板顶部）── */
 #search-box{
-  position:fixed;
-  top:calc(var(--th) + 10px);
-  left:12px;
-  width:260px;
-  z-index:600;
+  flex-shrink:0;
+  padding:10px 14px 8px;
+  border-bottom:1px solid var(--border);
+  background:var(--bg);
+  position:relative;  /* 让结果下拉在面板内展开 */
 }
 #search-input-wrap{
   display:flex;align-items:center;gap:8px;
-  background:rgba(15,17,23,.92);backdrop-filter:blur(12px);
-  border:1px solid var(--border);border-radius:8px;
+  background:var(--card);
+  border:1px solid var(--border);border-radius:7px;
   padding:7px 11px;transition:border-color .2s;
 }
 #search-input-wrap:focus-within{border-color:var(--gold);}
-#search-icon{font-size:14px;flex-shrink:0;color:var(--sub);}
+#search-icon{font-size:13px;flex-shrink:0;color:var(--sub);}
 #search-input{
   flex:1;background:transparent;border:none;outline:none;
   color:var(--txt);font-size:12px;
@@ -178,10 +178,11 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 #search-clear:hover{color:var(--txt);}
 
 #search-results{
-  margin-top:4px;
-  background:rgba(15,17,23,.96);backdrop-filter:blur(12px);
+  position:absolute;left:14px;right:14px;top:calc(100% - 8px);
+  background:rgba(15,17,23,.97);backdrop-filter:blur(12px);
   border:1px solid var(--border);border-radius:8px;
-  overflow:hidden;display:none;max-height:300px;overflow-y:auto;
+  overflow:hidden;display:none;max-height:260px;overflow-y:auto;
+  z-index:1100;box-shadow:0 8px 24px rgba(0,0,0,.5);
 }
 #search-results::-webkit-scrollbar{width:3px;}
 #search-results::-webkit-scrollbar-thumb{background:var(--border);}
@@ -196,6 +197,13 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 .sr-name{font-size:12px;color:var(--txt);font-weight:600;}
 .sr-sub{font-size:10px;color:var(--sub);margin-top:1px;}
 .sr-empty{padding:12px 11px;font-size:12px;color:var(--dim);}
+
+/* ── 启动自检提示 ── */
+#selftest-banner{
+  padding:6px 14px;font-size:10px;color:#e05c3a;background:#1a0a08;
+  border-bottom:1px solid #e05c3a40;display:none;
+  line-height:1.6;
+}
 
 /* 搜索标记（固定在地图上的 pin）*/
 .search-pin-wrap{
@@ -242,18 +250,6 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 <div id="topbar"></div>
 <div id="map"></div>
 
-<!-- 搜索框（地图左上角浮层）-->
-<div id="search-box">
-  <div id="search-input-wrap">
-    <span id="search-icon">🔍</span>
-    <input id="search-input" type="text"
-      placeholder="搜索现代地名或历史行政区划…"
-      autocomplete="off" spellcheck="false"/>
-    <span id="search-clear" onclick="clearSearch()">✕</span>
-  </div>
-  <div id="search-results"></div>
-</div>
-
 <!-- 并存政权图例（仅在宋/辽、南宋/金等时期显示）-->
 <div id="regime-legend">
   <h4>本期并存政权</h4>
@@ -296,6 +292,21 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 </div>
 
 <div id="panel">
+  <!-- 搜索框（面板顶部）-->
+  <div id="search-box">
+    <div id="search-input-wrap">
+      <span id="search-icon">🔍</span>
+      <input id="search-input" type="text"
+        placeholder="搜索地名或历史行政区划…"
+        autocomplete="off" spellcheck="false"/>
+      <span id="search-clear" onclick="clearSearch()">✕</span>
+    </div>
+    <div id="search-results"></div>
+  </div>
+
+  <!-- 启动自检错误提示（有问题时显示）-->
+  <div id="selftest-banner"></div>
+
   <!-- 朝代信息头 -->
   <div id="ph">
     <div id="ph-badge">🗺 当前朝代</div>
@@ -409,7 +420,11 @@ function initMap() {
   layerGroups.events = L.layerGroup().addTo(map);
 }
 
-/* ── 构建单个政权的 GeoJSON 图层（同时填充 featureLayerMap）── */
+/* ── 构建单个政权的 GeoJSON 图层（同时填充 featureLayerMap）──
+   ⚠ 关键：featureLayerMap.set 必须在 L.geoJSON() 返回之后执行。
+   若在 onEachFeature 内部直接引用 const layer，会触发 TDZ ReferenceError
+   导致整个图层不渲染（Leaflet 内部捕获但多边形全部丢失）。
+── */
 function buildRegimeLayer(gj, color, regimeName, isMainDynasty) {
   if (!gj || !gj.features || !gj.features.length) return null;
 
@@ -424,7 +439,10 @@ function buildRegimeLayer(gj, color, regimeName, isMainDynasty) {
     opacity: 1,
   };
 
-  const layer = L.geoJSON(gj, {
+  // 用 let 提前声明，onEachFeature 内的 mouseout 闭包能在运行时（而非定义时）读到正确值
+  let layer;
+
+  layer = L.geoJSON(gj, {
     style: () => ({ ...normalStyle }),
     onEachFeature(feature, fl) {
       const p = feature.properties;
@@ -434,12 +452,6 @@ function buildRegimeLayer(gj, color, regimeName, isMainDynasty) {
         { className: 'unit-tt', sticky: true }
       );
 
-      // 注册到 featureLayerMap，key = 'name@dynastyId'
-      if (p.name) {
-        featureLayerMap.set(`${p.name}@${S.dynastyId}`, { fl, layer, color });
-        featureLayerMap.set(p.name, { fl, layer, color }); // 也注册无朝代key，供快速查找
-      }
-
       fl.on('click', e => {
         L.DomEvent.stopPropagation(e);
         if (selectedLayer && selectedLayer !== fl && activeGeoJsonLayer) {
@@ -447,15 +459,24 @@ function buildRegimeLayer(gj, color, regimeName, isMainDynasty) {
         }
         selectedLayer = fl;
         applySelectedStyle(fl, color);
-        // 设置选中单元并更新关联事件
         selectedUnitName = p.name || null;
         onFeatureClickWithRegime(feature, fl, color, regimeName);
-        updateEvList(); // 触发事件列表联动
+        updateEvList();
       });
 
+      // mouseout 使用闭包引用 layer（运行时 layer 已赋值，安全）
       fl.on('mouseover', () => { if (fl !== selectedLayer) fl.setStyle(hoverStyle); });
-      fl.on('mouseout',  () => { if (fl !== selectedLayer) layer.resetStyle(fl); });
+      fl.on('mouseout',  () => { if (fl !== selectedLayer && layer) layer.resetStyle(fl); });
     },
+  });
+
+  // L.geoJSON 返回后 layer 已赋值，再填 featureLayerMap（避免 TDZ）
+  layer.eachLayer(fl => {
+    const p = fl.feature?.properties;
+    if (p?.name) {
+      featureLayerMap.set(`${p.name}@${S.dynastyId}`, { fl, layer, color });
+      featureLayerMap.set(p.name, { fl, layer, color });
+    }
   });
 
   return layer;
@@ -1391,12 +1412,75 @@ function initSearch() {
   });
 }
 
+/* ══ 启动自检 ══════════════════════════════════════════════════
+   每次刷新自动运行，发现问题显示在面板顶部红色 banner
+   检查项：JS 数据加载、GeoJSON 完整性、关键 DOM 元素
+═══════════════════════════════════════════════════════════════ */
+function runSelfTest() {
+  const errors = [];
+  const warnings = [];
+
+  // 1. 检查数据文件是否加载
+  if (typeof DYNASTIES === 'undefined' || !DYNASTIES.length) {
+    errors.push('data.js 未加载或 DYNASTIES 为空');
+  }
+  if (typeof EVENTS === 'undefined' || !EVENTS.length) {
+    errors.push('data.js 未加载或 EVENTS 为空');
+  }
+  if (typeof CHGIS_GEOJSON === 'undefined') {
+    errors.push('geojson.js 未加载 — 行政区划多边形无法显示（可能因 file:// 协议限制，建议通过本地服务器访问）');
+  } else {
+    // 检查各朝代数据
+    const expectedKeys = ['qin','han_w','tang','song_liao','yuan','ming','qing'];
+    const missing = expectedKeys.filter(k => !CHGIS_GEOJSON[k] || !CHGIS_GEOJSON[k].features?.length);
+    if (missing.length) {
+      warnings.push(`GeoJSON 缺失朝代: ${missing.join(', ')}`);
+    } else {
+      const total = Object.values(CHGIS_GEOJSON).reduce((s, g) => s + (g.features?.length || 0), 0);
+      console.info(`✓ geojson.js 已加载: ${Object.keys(CHGIS_GEOJSON).length} 个朝代, ${total} 个特征`);
+    }
+  }
+
+  // 2. 检查关键 DOM 元素
+  const requiredIds = ['map','panel','topbar','ev-list','loc-card','search-input'];
+  const missingDom = requiredIds.filter(id => !document.getElementById(id));
+  if (missingDom.length) {
+    errors.push(`DOM 元素缺失: #${missingDom.join(', #')}`);
+  }
+
+  // 3. 输出到 banner
+  const banner = document.getElementById('selftest-banner');
+  if (banner) {
+    if (errors.length || warnings.length) {
+      const msgs = [
+        ...errors.map(e => `❌ ${e}`),
+        ...warnings.map(w => `⚠️ ${w}`),
+      ];
+      banner.innerHTML = msgs.join('<br>');
+      banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
+  if (errors.length) {
+    console.error('【自检失败】', errors);
+  }
+  if (warnings.length) {
+    console.warn('【自检警告】', warnings);
+  }
+
+  return { errors, warnings };
+}
+
 /* ── 启动 ── */
 window.addEventListener('DOMContentLoaded', () => {
   setTimeout(() => {
     document.getElementById('loading').style.opacity = '0';
     setTimeout(() => document.getElementById('loading').style.display = 'none', 500);
-    buildTopbar(); initMap(); initEvents(); initSearch(); updateAll();
+    buildTopbar(); initMap(); initEvents(); initSearch();
+    runSelfTest(); // 自检：检查数据完整性
+    updateAll();
   }, 1200);
 });
 </script>
