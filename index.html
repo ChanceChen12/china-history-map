@@ -287,7 +287,7 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 <div id="yearbar">
   <button id="play-btn">▶</button>
   <span id="yr-lbl">公元前221</span>
-  <input type="range" id="yr-sl" min="-221" max="1949" value="-221">
+  <input type="range" id="yr-sl" min="-221" max="2024" value="-221">
   <span id="yr-era">秦朝</span>
 </div>
 
@@ -938,7 +938,7 @@ function updateEvList() {
 function syncSlider() {
   const sl = document.getElementById('yr-sl');
   sl.value = S.year;
-  const pct = ((S.year - (-221)) / (1949 - (-221)) * 100).toFixed(2);
+  const pct = ((S.year - (-221)) / (2024 - (-221)) * 100).toFixed(2);
   sl.style.setProperty('--pct', pct + '%');
   document.getElementById('yr-lbl').textContent = yearLabel(S.year);
   document.getElementById('yr-era').textContent = getDynasty(S.dynastyId)?.full || '';
@@ -980,7 +980,7 @@ function initEvents() {
     if (timer) { clearInterval(timer); timer = null; this.textContent = '▶'; return; }
     this.textContent = '⏸';
     timer = setInterval(() => {
-      if (S.year >= 1949) { clearInterval(timer); timer = null; document.getElementById('play-btn').textContent = '▶'; return; }
+      if (S.year >= 2024) { clearInterval(timer); timer = null; document.getElementById('play-btn').textContent = '▶'; return; }
       S.year += 2;
       const d = getDynastyByYear(S.year);
       const changed = d.id !== S.dynastyId;
