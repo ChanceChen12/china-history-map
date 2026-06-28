@@ -119,6 +119,10 @@ html,body{height:100%;overflow:hidden;font-family:"PingFang SC","Microsoft YaHei
 .ev-tag{font-size:9px;padding:1px 5px;border-radius:3px;background:var(--bg);color:var(--sub);border:1px solid var(--border);}
 .ev-stars{display:flex;flex-direction:column;gap:1px;flex-shrink:0;}
 .st{font-size:8px;line-height:1.2;}.st.on{color:var(--gold);}.st.off{color:var(--border);}
+/* 区划关联事件特殊样式 */
+.area-ev{background:rgba(201,162,39,.05)!important;border-color:rgba(201,162,39,.25)!important;}
+.area-ev:hover{background:rgba(201,162,39,.12)!important;}
+.ev-tag-linked{border-color:var(--gold)!important;color:var(--gold)!important;cursor:pointer;}
 
 /* 地图 tooltip/popup */
 .unit-tt{background:rgba(15,17,23,.93)!important;border:1px solid #c9a22770!important;color:var(--txt)!important;border-radius:5px!important;padding:5px 9px!important;font-size:11px!important;font-family:"PingFang SC","Microsoft YaHei",sans-serif!important;}
@@ -345,7 +349,10 @@ const layerGroups      = { admin: null, events: null };
 const layerVisible     = { admin: true, events: true };
 let   activeGeoJsonLayer = null;  // 当前渲染的 CHGIS 图层
 let   selectedLayer      = null;  // 当前选中的多边形图层
-let   dynastyColor       = '#c9a227'; // 当前朝代颜色（供选中样式使用）
+let   dynastyColor       = '#c9a227';
+// 事件↔区划双向关联
+const featureLayerMap  = new Map(); // 'featName@dynastyId' → Leaflet layer
+let   selectedUnitName = null;      // 当前选中的行政区划名称（用于过滤事件）
 
 /* 选中样式：加粗白色外框 + 高饱和度填充 */
 function applySelectedStyle(layer, color) {
@@ -402,7 +409,7 @@ function initMap() {
   layerGroups.events = L.layerGroup().addTo(map);
 }
 
-/* ── 构建单个政权的 GeoJSON 图层 ── */
+/* ── 构建单个政权的 GeoJSON 图层（同时填充 featureLayerMap）── */
 function buildRegimeLayer(gj, color, regimeName, isMainDynasty) {
   if (!gj || !gj.features || !gj.features.length) return null;
 
@@ -427,6 +434,12 @@ function buildRegimeLayer(gj, color, regimeName, isMainDynasty) {
         { className: 'unit-tt', sticky: true }
       );
 
+      // 注册到 featureLayerMap，key = 'name@dynastyId'
+      if (p.name) {
+        featureLayerMap.set(`${p.name}@${S.dynastyId}`, { fl, layer, color });
+        featureLayerMap.set(p.name, { fl, layer, color }); // 也注册无朝代key，供快速查找
+      }
+
       fl.on('click', e => {
         L.DomEvent.stopPropagation(e);
         if (selectedLayer && selectedLayer !== fl && activeGeoJsonLayer) {
@@ -434,7 +447,10 @@ function buildRegimeLayer(gj, color, regimeName, isMainDynasty) {
         }
         selectedLayer = fl;
         applySelectedStyle(fl, color);
+        // 设置选中单元并更新关联事件
+        selectedUnitName = p.name || null;
         onFeatureClickWithRegime(feature, fl, color, regimeName);
+        updateEvList(); // 触发事件列表联动
       });
 
       fl.on('mouseover', () => { if (fl !== selectedLayer) fl.setStyle(hoverStyle); });
@@ -450,6 +466,8 @@ function renderAdminLayer() {
   layerGroups.admin.clearLayers();
   activeGeoJsonLayer = null;
   selectedLayer      = null;
+  selectedUnitName   = null;
+  featureLayerMap.clear(); // 清空上一朝代的映射
 
   const d  = getDynasty(S.dynastyId);
   if (!d) return;
@@ -574,7 +592,7 @@ function focusRegime(geojsonKey) {
   map.fitBounds(bounds, { padding: [40, 40], maxZoom: 7 });
 }
 
-/* ── 渲染历史事件层 ── */
+/* ── 渲染历史事件层（点击时同时高亮对应行政区划）── */
 function renderEventsLayer() {
   layerGroups.events.clearLayers();
   const evs = EVENTS.filter(e => e.dynasty === S.dynastyId && (S.evFilter === 'all' || e.type === S.evFilter));
@@ -582,13 +600,22 @@ function renderEventsLayer() {
     const near = Math.abs(ev.year - S.year) < 5;
     const c = typeColor(ev.type);
     const m = L.circleMarker([ev.lat, ev.lng], {
-      radius: 4 + ev.sig * 1.6, color:c, weight: near?3:1.5,
-      fillColor:c, fillOpacity: near?.95:.5,
+      radius: 4 + ev.sig * 1.6, color: c, weight: near ? 3 : 1.5,
+      fillColor: c, fillOpacity: near ? .95 : .5,
     });
+    // 弹窗：含单元名和详细描述
+    const unitTag = ev.unit ? `<span style="display:inline-block;margin-top:4px;padding:1px 6px;border-radius:3px;border:1px solid #c9a22760;color:#c9a227;font-size:9px">${ev.unit}</span>` : '';
     m.bindPopup(
-      `<div class="ep"><div class="ep-name">${ev.title}</div><div class="ep-meta">${yearLabel(ev.year)} · ${typeName(ev.type)} · ${'★'.repeat(ev.sig)}${'☆'.repeat(5-ev.sig)}</div><div class="ep-desc">${ev.desc}</div></div>`,
-      {maxWidth:260}
+      `<div class="ep">
+        <div class="ep-name">${ev.title}</div>
+        <div class="ep-meta">${yearLabel(ev.year)} · ${typeName(ev.type)} · ${'★'.repeat(ev.sig)}${'☆'.repeat(5 - ev.sig)}</div>
+        ${unitTag}
+        <div class="ep-desc" style="margin-top:6px">${ev.desc}</div>
+      </div>`,
+      { maxWidth: 260 }
     );
+    // 点击地图事件标记 → 联动高亮行政区划
+    m.on('click', () => onEventClick(ev));
     layerGroups.events.addLayer(m);
   });
 }
@@ -708,12 +735,13 @@ function toggleHist() {
 function clearLoc() {
   S.selectedFeature = null;
   S.histExpanded    = false;
-  // 取消地图上的选中高亮
+  selectedUnitName  = null;  // 清除区划选中 → 恢复全量事件列表
   clearSelectedStyle();
   document.getElementById('loc-hint').style.display      = '';
   document.getElementById('loc-clear-btn').style.display = 'none';
   document.getElementById('loc-card').style.display      = 'none';
   document.getElementById('hist-tbl').style.display      = 'none';
+  updateEvList(); // 恢复显示全部事件
 }
 
 /* ── 数据覆盖率（含质量说明）── */
@@ -780,27 +808,110 @@ function updatePanelHeader() {
   document.getElementById('ph-admin').textContent  = `行政制度：${d.adminDesc}`;
 }
 
+/* ── 点击事件 → 高亮对应行政区划 ── */
+function onEventClick(ev) {
+  // 1. 飞到事件位置
+  map.flyTo([ev.lat, ev.lng], 8, { duration: 1.0 });
+
+  // 2. 查找并高亮包含该事件坐标的行政区划
+  if (!ev.unit) return;
+
+  // 先尝试按名称精确匹配
+  const entry = featureLayerMap.get(`${ev.unit}@${S.dynastyId}`)
+              || featureLayerMap.get(ev.unit);
+
+  if (entry) {
+    const { fl, layer, color } = entry;
+    // 清除旧选中
+    if (selectedLayer && selectedLayer !== fl && activeGeoJsonLayer) {
+      activeGeoJsonLayer.resetStyle(selectedLayer);
+    }
+    selectedLayer = fl;
+    selectedUnitName = ev.unit;
+    applySelectedStyle(fl, color);
+
+    // 更新面板（模拟点击该多边形）
+    if (fl.feature) {
+      onFeatureClickWithRegime(fl.feature, fl, color, getDynasty(S.dynastyId)?.name || '');
+    }
+  } else {
+    // 按坐标做 PIP 查找
+    const result = findAdminForPin(ev.lat, ev.lng);
+    if (result) {
+      const nameEntry = featureLayerMap.get(result.feat.properties.name);
+      if (nameEntry) {
+        if (selectedLayer && selectedLayer !== nameEntry.fl && activeGeoJsonLayer) {
+          activeGeoJsonLayer.resetStyle(selectedLayer);
+        }
+        selectedLayer = nameEntry.fl;
+        selectedUnitName = result.feat.properties.name;
+        applySelectedStyle(nameEntry.fl, nameEntry.color);
+      }
+    }
+  }
+  updateEvList();
+}
+
+function buildEvItem(ev, isAreaEvent) {
+  const near = Math.abs(ev.year - S.year) < 5;
+  const c = typeColor(ev.type);
+  // 判断该事件的行政区划是否在 featureLayerMap 里（有对应多边形可高亮）
+  const hasPolygon = ev.unit && (featureLayerMap.has(`${ev.unit}@${S.dynastyId}`) || featureLayerMap.has(ev.unit));
+  const areaClass  = isAreaEvent ? ' area-ev' : '';
+  return `<div class="ev-item${near?' hl':''}${areaClass}" onclick="onEventClick(EVENTS.find(e=>e.title===${JSON.stringify(ev.title)}&&e.year===${ev.year}))">
+    <div class="ev-dot" style="background:${c}"></div>
+    <div class="ev-body">
+      <div class="ev-yr">${yearLabel(ev.year)}</div>
+      <div class="ev-tt">${ev.title}</div>
+      <div class="ev-tags">
+        <span class="ev-tag" style="border-color:${c}60;color:${c}">${typeName(ev.type)}</span>
+        ${ev.unit ? `<span class="ev-tag${hasPolygon?' ev-tag-linked':''}" title="${hasPolygon?'点击可高亮对应区划':''}">${ev.unit}</span>` : ''}
+      </div>
+    </div>
+    <div class="ev-stars">${Array.from({length:5},(_,i)=>`<span class="st ${i<ev.sig?'on':'off'}">${i<ev.sig?'★':'☆'}</span>`).join('')}</div>
+  </div>`;
+}
+
 function updateEvList() {
   const list = document.getElementById('ev-list');
   let evs = EVENTS.filter(e => e.dynasty === S.dynastyId && (S.evFilter === 'all' || e.type === S.evFilter));
   evs.sort((a, b) => b.sig - a.sig);
-  if (!evs.length) { list.innerHTML = '<div style="font-size:11px;color:var(--dim);padding:10px 8px">暂无事件记录</div>'; return; }
-  list.innerHTML = evs.map(ev => {
-    const near = Math.abs(ev.year - S.year) < 5;
-    const c = typeColor(ev.type);
-    return `<div class="ev-item${near?' hl':''}" onclick="map.flyTo([${ev.lat},${ev.lng}],8,{duration:1.2})">
-      <div class="ev-dot" style="background:${c}"></div>
-      <div class="ev-body">
-        <div class="ev-yr">${yearLabel(ev.year)}</div>
-        <div class="ev-tt">${ev.title}</div>
-        <div class="ev-tags">
-          <span class="ev-tag" style="border-color:${c}60;color:${c}">${typeName(ev.type)}</span>
-          ${ev.unit ? `<span class="ev-tag">${ev.unit}</span>` : ''}
-        </div>
-      </div>
-      <div class="ev-stars">${Array.from({length:5},(_,i)=>`<span class="st ${i<ev.sig?'on':'off'}">${i<ev.sig?'★':'☆'}</span>`).join('')}</div>
-    </div>`;
-  }).join('');
+
+  if (!evs.length) {
+    list.innerHTML = '<div style="font-size:11px;color:var(--dim);padding:10px 8px">暂无事件记录</div>';
+    return;
+  }
+
+  // 如果有选中的行政区划，在顶部显示「此区域事件」
+  let html = '';
+  if (selectedUnitName) {
+    // 匹配：事件的 unit 包含选中单元名，或单元名包含事件 unit
+    const areaEvs = evs.filter(e => e.unit && (
+      e.unit.includes(selectedUnitName) ||
+      selectedUnitName.includes(e.unit.split('（')[0])
+    ));
+    if (areaEvs.length) {
+      html += `<div style="font-size:9px;color:var(--gold);letter-spacing:1px;padding:8px 10px 4px;display:flex;align-items:center;gap:6px">
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--gold);flex-shrink:0"></span>
+        「${selectedUnitName}」相关事件（${areaEvs.length}）
+        <span style="flex:1;height:1px;background:var(--gold);opacity:.3"></span>
+      </div>`;
+      html += areaEvs.map(ev => buildEvItem(ev, true)).join('');
+      html += `<div style="font-size:9px;color:var(--dim);letter-spacing:1px;padding:8px 10px 4px;display:flex;align-items:center;gap:6px;margin-top:4px">
+        <span>全朝代事项</span>
+        <span style="flex:1;height:1px;background:var(--border)"></span>
+      </div>`;
+    } else {
+      html += `<div style="font-size:11px;color:var(--dim);padding:8px 10px">「${selectedUnitName}」暂无匹配事件记录</div>
+        <div style="font-size:9px;color:var(--dim);letter-spacing:1px;padding:4px 10px;display:flex;align-items:center;gap:6px">
+          <span>全朝代事项</span>
+          <span style="flex:1;height:1px;background:var(--border)"></span>
+        </div>`;
+    }
+  }
+
+  html += evs.map(ev => buildEvItem(ev, false)).join('');
+  list.innerHTML = html;
 }
 
 function syncSlider() {
