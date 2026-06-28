@@ -855,10 +855,10 @@ function onEventClick(ev) {
 function buildEvItem(ev, isAreaEvent) {
   const near = Math.abs(ev.year - S.year) < 5;
   const c = typeColor(ev.type);
-  // 判断该事件的行政区划是否在 featureLayerMap 里（有对应多边形可高亮）
   const hasPolygon = ev.unit && (featureLayerMap.has(`${ev.unit}@${S.dynastyId}`) || featureLayerMap.has(ev.unit));
   const areaClass  = isAreaEvent ? ' area-ev' : '';
-  return `<div class="ev-item${near?' hl':''}${areaClass}" onclick="onEventClick(EVENTS.find(e=>e.title===${JSON.stringify(ev.title)}&&e.year===${ev.year}))">
+  const evIdx = EVENTS.indexOf(ev);
+  return `<div class="ev-item${near?' hl':''}${areaClass}" onclick="onEventClick(EVENTS[${evIdx}])">
     <div class="ev-dot" style="background:${c}"></div>
     <div class="ev-body">
       <div class="ev-yr">${yearLabel(ev.year)}</div>
